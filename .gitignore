@@ -1,0 +1,13 @@
+# Python venv
+.venv/
+
+# Downloads and logs
+downloads/
+logs/
+
+# Bytecode
+__pycache__/
+*.pyc
+
+local-test.py
+.env
