@@ -43,6 +43,19 @@ def test_google_filter():
     print(f"   Result: {result}")
     print("   → Web scraping is unreliable due to Google's anti-bot measures\n")
     
+    # Test with simple web scraping fallback disabled
+    print("2a. Testing with simple web scraping fallback disabled:")
+    config = RuntimeConfig(
+        filter_queries_with_google=True,
+        use_google_search_fallback=True,
+        use_simple_web_scraping_fallback=False
+    )
+    set_runtime_config(config)
+    
+    result = google_search_filter_query_main("bohemian rhapsody")
+    print(f"   Result: {result}")
+    print("   → Only comprehensive search and query parsing are used\n")
+    
     # Test with mock API credentials
     print("3. Testing with invalid API credentials:")
     config = RuntimeConfig(
@@ -65,6 +78,17 @@ def test_google_filter():
     print("python main.py --input songs.txt --filter-queries-with-google \\")
     print("  --google-api-key YOUR_ACTUAL_API_KEY \\")
     print("  --google-search-engine-id YOUR_ACTUAL_ENGINE_ID")
+    
+    print("\n=== FALLBACK OPTIONS ===")
+    print("Control fallback behavior with additional options:")
+    print("--use-google-search-fallback: Enable comprehensive web scraping fallback")
+    print("--use-simple-web-scraping-fallback: Enable simple web scraping fallback (default: True)")
+    print("--use-llm-google-parsing: Use LLM for parsing search results")
+    print("\nExample with fallback control:")
+    print("python main.py --input songs.txt --filter-queries-with-google \\")
+    print("  --use-google-search-fallback \\")
+    print("  --no-use-simple-web-scraping-fallback \\")
+    print("  → Uses comprehensive search + query parsing only")
     
     print("\n=== LLM-BASED PARSING ===")
     print("For more reliable parsing without Google API:")

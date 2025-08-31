@@ -6,11 +6,14 @@ import logging
 import sys
 import unicodedata
 import re
+import csv
+import threading
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 
 
-def configure_logging(verbosity: str, log_file: Path) -> None:
+def configure_logging(verbosity: str, log_file: Path, enable_csv_logging: bool = False) -> None:
     """Configure root logger with console and file handlers.
 
     This function sets up a comprehensive logging system that writes to both
@@ -23,6 +26,8 @@ def configure_logging(verbosity: str, log_file: Path) -> None:
         One of DEBUG, INFO, WARNING, ERROR.
     log_file: Path
         File path to write detailed logs.
+    enable_csv_logging: bool
+        Whether to enable CSV logging for concurrent operations.
 
     Examples
     --------
@@ -54,6 +59,102 @@ def configure_logging(verbosity: str, log_file: Path) -> None:
 
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
+    
+    # Set CSV logging flag in global config if enabled
+    if enable_csv_logging:
+        root_logger.csv_logging_enabled = True
+        root_logger.csv_log_file = log_file.parent / f"{log_file.stem}_concurrent.csv"
+        # Initialize CSV file with headers
+        _init_csv_log_file(root_logger.csv_log_file)
+
+
+def _init_csv_log_file(csv_file: Path) -> None:
+    """Initialize CSV log file with headers."""
+    csv_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Only write headers if file doesn't exist or is empty
+    if not csv_file.exists() or csv_file.stat().st_size == 0:
+        with csv_file.open('w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp',
+                'thread_id',
+                'query_index',
+                'query',
+                'url',
+                'success',
+                'reason',
+                'duration_ms',
+                'status'
+            ])
+
+
+def log_download_result_csv(
+    query: str,
+    url: Optional[str],
+    success: bool,
+    reason: Optional[str] = None,
+    query_index: Optional[int] = None,
+    duration_ms: Optional[float] = None,
+    status: str = "completed"
+) -> None:
+    """Log download result in CSV format for concurrent operations.
+    
+    This function logs download results in a structured CSV format that makes it
+    easy to analyze concurrent operations, identify failures, and sort by various criteria.
+    
+    Parameters
+    ----------
+    query: str
+        The search query that was processed.
+    url: Optional[str]
+        The YouTube URL that was downloaded (or None if failed).
+    success: bool
+        Whether the download was successful.
+    reason: Optional[str]
+        Error reason if download failed.
+    query_index: Optional[int]
+        The index/position of this query in the batch.
+    duration_ms: Optional[float]
+        How long the operation took in milliseconds.
+    status: str
+        Status of the operation (e.g., "started", "completed", "failed").
+    """
+    logger = logging.getLogger()
+    
+    # Check if CSV logging is enabled
+    if not hasattr(logger, 'csv_logging_enabled') or not logger.csv_logging_enabled:
+        return
+    
+    try:
+        csv_file = logger.csv_log_file
+        thread_id = threading.get_ident()
+        timestamp = datetime.now().isoformat()
+        
+        with csv_file.open('a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp,
+                thread_id,
+                query_index or '',
+                query,
+                url or '',
+                '1' if success else '0',  # Use 1/0 for boolean in CSV
+                reason or '',
+                f"{duration_ms:.2f}" if duration_ms is not None else '',
+                status
+            ])
+    except Exception as e:
+        # Fallback to regular logging if CSV logging fails
+        logging.warning("Failed to write CSV log entry: %s", e)
+
+
+def get_csv_log_file() -> Optional[Path]:
+    """Get the path to the CSV log file if CSV logging is enabled."""
+    logger = logging.getLogger()
+    if hasattr(logger, 'csv_logging_enabled') and logger.csv_logging_enabled:
+        return logger.csv_log_file
+    return None
 
 
 def read_queries(file_path: Path) -> List[str]:
@@ -489,6 +590,8 @@ __all__ = [
     "configure_logging",
     "read_queries", 
     "ensure_ffmpeg_available",
+    "log_download_result_csv",
+    "get_csv_log_file",
     "_normalize_text",
     "_strip_common_noise",
     "_tokenize",

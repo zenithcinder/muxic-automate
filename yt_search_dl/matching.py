@@ -65,24 +65,32 @@ def _get_preferred_device() -> str:
                 # Test if we can create a tensor on GPU
                 test_tensor = torch.tensor([1.0], device="cuda")
                 del test_tensor  # Clean up
+                logging.info("GPU (CUDA) detected and available for AI matching")
                 return "cuda"
-            except Exception:
-                logging.debug(
-                    "CUDA available but failed to create test tensor, falling back to CPU"
+            except Exception as gpu_error:
+                logging.warning(
+                    "CUDA available but failed to create test tensor: %s, falling back to CPU",
+                    gpu_error
                 )
                 return "cpu"
         else:
+            logging.info("No CUDA GPU available, using CPU for AI matching")
             return "cpu"
     except ImportError:
         # PyTorch not available, use CPU
+        logging.warning("PyTorch not available, using CPU for AI matching")
         return "cpu"
-    except Exception:
+    except Exception as e:
         # Any other error, fall back to CPU
+        logging.warning("Error detecting GPU: %s, falling back to CPU", e)
         return "cpu"
 
 
 def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-    """Load sentence-transformers model once if AI match is enabled."""
+    """Load sentence-transformers model once if AI match is enabled.
+    
+    Handles PyTorch meta tensor issues with newer versions by using to_empty() method.
+    """
     model = get_embed_model()
     if model is not None:
         return model
@@ -99,10 +107,22 @@ def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v
     preferred_device = _get_preferred_device()
 
     try:
-        model = SentenceTransformer(model_name, device=preferred_device)
+        # Handle meta tensor issue with newer PyTorch versions
+        try:
+            if preferred_device == "cuda":
+                logging.info("Attempting to load model on GPU (CUDA)...")
+            model = SentenceTransformer(model_name, device=preferred_device)
+        except RuntimeError as meta_error:
+            if "meta tensor" in str(meta_error).lower():
+                # Use to_empty() for meta tensor handling
+                logging.info("Handling meta tensor issue with to_empty() method...")
+                model = SentenceTransformer(model_name)
+                model = model.to_empty(device=preferred_device)
+            else:
+                raise
         set_embed_model(model)
         logging.info(
-            "AI matching: loaded model on %s: %s", preferred_device, model_name
+            "AI matching: successfully loaded model on %s: %s", preferred_device, model_name
         )
     except Exception as load_error:  # noqa: BLE001
         logging.warning(
@@ -116,7 +136,16 @@ def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v
         if preferred_device != "cpu":
             try:
                 logging.info("Retrying with CPU device...")
-                model = SentenceTransformer(model_name, device="cpu")
+                # Handle meta tensor issue with newer PyTorch versions
+                try:
+                    model = SentenceTransformer(model_name, device="cpu")
+                except RuntimeError as meta_error:
+                    if "meta tensor" in str(meta_error).lower():
+                        # Use to_empty() for meta tensor handling
+                        model = SentenceTransformer(model_name)
+                        model = model.to_empty(device="cpu")
+                    else:
+                        raise
                 set_embed_model(model)
                 logging.info("AI matching: loaded model on cpu: %s", model_name)
             except Exception as cpu_load_error:  # noqa: BLE001
@@ -134,7 +163,16 @@ def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v
         fallback = "sentence-transformers/all-MiniLM-L6-v2"
         if model_name != fallback:
             try:
-                model = SentenceTransformer(fallback, device=preferred_device)
+                # Handle meta tensor issue with newer PyTorch versions
+                try:
+                    model = SentenceTransformer(fallback, device=preferred_device)
+                except RuntimeError as meta_error:
+                    if "meta tensor" in str(meta_error).lower():
+                        # Use to_empty() for meta tensor handling
+                        model = SentenceTransformer(fallback)
+                        model = model.to_empty(device=preferred_device)
+                    else:
+                        raise
                 set_embed_model(model)
                 logging.warning(
                     "AI matching: falling back to model on %s: %s",
@@ -145,7 +183,16 @@ def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v
                 # Try CPU for fallback model too
                 if preferred_device != "cpu":
                     try:
-                        model = SentenceTransformer(fallback, device="cpu")
+                        # Handle meta tensor issue with newer PyTorch versions
+                        try:
+                            model = SentenceTransformer(fallback, device="cpu")
+                        except RuntimeError as meta_error:
+                            if "meta tensor" in str(meta_error).lower():
+                                # Use to_empty() for meta tensor handling
+                                model = SentenceTransformer(fallback)
+                                model = model.to_empty(device="cpu")
+                            else:
+                                raise
                         set_embed_model(model)
                         logging.warning(
                             "AI matching: falling back to model on cpu: %s", fallback
@@ -628,6 +675,60 @@ def pick_entry(entries: list, strategy: str) -> dict | None:
     return entries[0]
 
 
+def check_gpu_availability() -> dict:
+    """Check GPU availability and provide detailed diagnostics."""
+    diagnostics = {
+        "gpu_available": False,
+        "cuda_available": False,
+        "device": "cpu",
+        "gpu_name": None,
+        "gpu_memory": None,
+        "error": None
+    }
+    
+    try:
+        import torch
+        
+        if torch.cuda.is_available():
+            diagnostics["cuda_available"] = True
+            
+            try:
+                # Test GPU functionality
+                test_tensor = torch.tensor([1.0], device="cuda")
+                del test_tensor
+                
+                diagnostics["gpu_available"] = True
+                diagnostics["device"] = "cuda"
+                
+                # Get GPU info
+                if torch.cuda.device_count() > 0:
+                    gpu_name = torch.cuda.get_device_name(0)
+                    diagnostics["gpu_name"] = gpu_name
+                    
+                    # Get GPU memory info
+                    try:
+                        memory_allocated = torch.cuda.memory_allocated(0) / 1024**3  # GB
+                        memory_reserved = torch.cuda.memory_reserved(0) / 1024**3  # GB
+                        diagnostics["gpu_memory"] = {
+                            "allocated_gb": round(memory_allocated, 2),
+                            "reserved_gb": round(memory_reserved, 2)
+                        }
+                    except Exception:
+                        pass
+                        
+            except Exception as e:
+                diagnostics["error"] = str(e)
+                diagnostics["gpu_available"] = False
+                diagnostics["device"] = "cpu"
+                
+    except ImportError:
+        diagnostics["error"] = "PyTorch not available"
+    except Exception as e:
+        diagnostics["error"] = str(e)
+    
+    return diagnostics
+
+
 __all__ = [
     "_duration_similarity_seconds",
     "_get_view_count",
@@ -644,4 +745,5 @@ __all__ = [
     "_should_skip_entry",
     "_find_exact_matches",
     "pick_entry",
+    "check_gpu_availability",
 ]

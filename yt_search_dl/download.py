@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Iterable, List
+from .utils import log_download_result_csv
 
 # yt-dlp will be imported when needed in functions
 
@@ -157,11 +158,18 @@ def process_queries(
     # Worker function for one query
     def process_one(args_tuple: tuple[int, str]) -> DownloadResult:
         idx, query = args_tuple
+        start_time = time.time()
+        
+        # Log start of processing
+        log_download_result_csv(query, None, False, None, idx, None, "started")
         logging.info("[%d] Searching: %s", idx, query)
+        
         url = search_video_url(query, config.search_count, config.select_strategy)
         if not url:
             msg = "No results found"
+            duration_ms = (time.time() - start_time) * 1000
             logging.warning("[%d] %s: %s", idx, msg, query)
+            log_download_result_csv(query, None, False, msg, idx, duration_ms, "failed")
             time.sleep(delay_seconds)
             return DownloadResult(query=query, url=None, success=False, reason=msg)
 
@@ -169,10 +177,14 @@ def process_queries(
         try:
             # Use per-call options to avoid accidental mutation
             download_mp3_from_url(url, dict(ydl_opts))
+            duration_ms = (time.time() - start_time) * 1000
             logging.info("[%d] Downloaded OK: %s", idx, url)
+            log_download_result_csv(query, url, True, None, idx, duration_ms, "completed")
             return DownloadResult(query=query, url=url, success=True)
         except Exception as error:  # noqa: BLE001
+            duration_ms = (time.time() - start_time) * 1000
             logging.error("[%d] Download failed: %s | %s", idx, url, error)
+            log_download_result_csv(query, url, False, str(error), idx, duration_ms, "failed")
             return DownloadResult(query=query, url=url, success=False, reason=str(error))
         finally:
             # Space out requests per worker
@@ -213,13 +225,22 @@ def process_urls(
 
     def process_one(args_tuple: tuple[int, str]) -> DownloadResult:
         idx, url = args_tuple
+        start_time = time.time()
+        
+        # Log start of processing
+        log_download_result_csv(url, None, False, None, idx, None, "started")
         logging.info("[%d] Downloading: %s", idx, url)
+        
         try:
             download_mp3_from_url(url, dict(ydl_opts))
+            duration_ms = (time.time() - start_time) * 1000
             logging.info("[%d] Downloaded OK: %s", idx, url)
+            log_download_result_csv(url, url, True, None, idx, duration_ms, "completed")
             return DownloadResult(query=url, url=url, success=True)
         except Exception as error:  # noqa: BLE001
+            duration_ms = (time.time() - start_time) * 1000
             logging.error("[%d] Download failed: %s | %s", idx, url, error)
+            log_download_result_csv(url, url, False, str(error), idx, duration_ms, "failed")
             return DownloadResult(query=url, url=url, success=False, reason=str(error))
         finally:
             time.sleep(delay_seconds)

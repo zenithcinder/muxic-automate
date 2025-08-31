@@ -101,6 +101,11 @@ Examples:
         help="Path to write detailed logs",
     )
     parser.add_argument(
+        "--csv-logging",
+        action="store_true",
+        help="Enable CSV logging for concurrent operations (creates separate CSV file)",
+    )
+    parser.add_argument(
         "--list-only",
         action="store_true",
         help="List search result links to a file instead of downloading",
@@ -194,6 +199,18 @@ Examples:
         help="Filter queries through Google search first and use first result details as input",
     )
     parser.add_argument(
+        "--use-simple-web-scraping-fallback",
+        action="store_true",
+        default=True,
+        help="Enable simple web scraping fallback when comprehensive Google search fails (default: True)",
+    )
+    parser.add_argument(
+        "--use-browser-based-search",
+        action="store_true",
+        default=True,
+        help="Enable browser-based Google search using Selenium to bypass restrictions (default: True)",
+    )
+    parser.add_argument(
         "--use-llm-google-parsing",
         action="store_true",
         help="Use LLM to parse Google search results (requires --llm-api-key)",
@@ -211,6 +228,33 @@ Examples:
         "--llm-base-url",
         help="Base URL for local LLM service (e.g., http://localhost:11434 for Ollama)",
     )
+    parser.add_argument(
+        "--google-filter-min-score",
+        type=float,
+        default=30.0,
+        help="Minimum score for Google search filtering API results (default: 30.0)",
+    )
+    parser.add_argument(
+        "--google-filter-llm-min-score",
+        type=float,
+        default=20.0,
+        help="Minimum score for Google search filtering LLM results (default: 20.0)",
+    )
+    parser.add_argument(
+        "--no-google-filter-boost-music",
+        action="store_true",
+        help="Disable boosting of music-related content in Google filtering",
+    )
+    parser.add_argument(
+        "--no-google-filter-penalize-spam",
+        action="store_true",
+        help="Disable penalizing of spam/ad content in Google filtering",
+    )
+    parser.add_argument(
+        "--no-google-filter-prefer-video",
+        action="store_true",
+        help="Disable preference for video platform results in Google filtering",
+    )
     return parser.parse_args(argv)
 
 
@@ -222,10 +266,16 @@ def main(argv: List[str] | None = None) -> int:
     log_file = Path(args.log_file).expanduser().resolve()
     list_output = Path(args.list_output).expanduser().resolve() if getattr(args, "list_output", None) else None
 
-    configure_logging(args.log_level, log_file)
+    configure_logging(args.log_level, log_file, args.csv_logging)
     logging.info("Input file: %s", input_path)
     logging.info("Output dir: %s", output_dir)
     logging.debug("Log file: %s", log_file)
+    
+    if args.csv_logging:
+        from yt_search_dl.utils import get_csv_log_file
+        csv_file = get_csv_log_file()
+        if csv_file:
+            logging.info("CSV logging enabled: %s", csv_file)
     
     # Log feature flags
     if args.deep_search:
@@ -242,8 +292,12 @@ def main(argv: List[str] | None = None) -> int:
             logging.info("Google search fallback (web scraping) enabled")
     if args.filter_queries_with_google:
         logging.info("Google query filtering enabled: will filter queries through Google search first")
-    if args.use_llm_google_parsing:
-        logging.info("LLM Google parsing enabled: will use LLM to parse search results")
+        if not args.use_simple_web_scraping_fallback:
+            logging.info("Simple web scraping fallback disabled: will only use comprehensive search and query parsing")
+        if args.use_browser_based_search:
+            logging.info("Browser-based Google search enabled: will use Selenium to bypass restrictions")
+        if args.use_llm_google_parsing:
+            logging.info("LLM Google parsing enabled: will use LLM to parse search results")
 
     try:
         queries = read_queries(input_path)
@@ -254,22 +308,7 @@ def main(argv: List[str] | None = None) -> int:
         logging.error("Failed to read queries: %s", error)
         return 1
 
-    # Apply Google search filtering if enabled
-    if args.filter_queries_with_google:
-        logging.info("Applying Google search filtering to %d queries...", len(queries))
-        filtered_queries = []
-        for i, query in enumerate(queries, 1):
-            logging.info("[%d/%d] Filtering query: %s", i, len(queries), query)
-            filtered_query = google_search_filter_query_main(query)
-            if filtered_query:
-                filtered_queries.append(filtered_query)
-                logging.info("[%d/%d] Filtered: '%s' -> '%s'", i, len(queries), query, filtered_query)
-            else:
-                filtered_queries.append(query)
-                logging.info("[%d/%d] No filter result, using original: %s", i, len(queries), query)
-        queries = filtered_queries
-
-    # Set runtime configuration
+    # Set runtime configuration first (needed for Google search filtering)
     config = RuntimeConfig(
         search_count=int(args.search_count),
         select_strategy=str(args.select_strategy),
@@ -293,12 +332,34 @@ def main(argv: List[str] | None = None) -> int:
         google_min_confidence=float(args.google_min_confidence),
         use_google_search_fallback=bool(args.use_google_search_fallback),
         filter_queries_with_google=bool(args.filter_queries_with_google),
+        use_simple_web_scraping_fallback=bool(args.use_simple_web_scraping_fallback),
+        use_browser_based_search=bool(args.use_browser_based_search),
         use_llm_google_parsing=bool(args.use_llm_google_parsing),
         llm_api_key=str(args.llm_api_key) if getattr(args, "llm_api_key", None) else None,
         llm_model=str(args.llm_model),
         llm_base_url=str(args.llm_base_url) if getattr(args, "llm_base_url", None) else None,
+        google_filter_min_score=float(args.google_filter_min_score),
+        google_filter_llm_min_score=float(args.google_filter_llm_min_score),
+        google_filter_boost_music_keywords=not bool(args.no_google_filter_boost_music),
+        google_filter_penalize_spam=not bool(args.no_google_filter_penalize_spam),
+        google_filter_prefer_video_platforms=not bool(args.no_google_filter_prefer_video),
     )
     set_runtime_config(config)
+
+    # Apply Google search filtering if enabled
+    if args.filter_queries_with_google:
+        logging.info("Applying Google search filtering to %d queries...", len(queries))
+        filtered_queries = []
+        for i, query in enumerate(queries, 1):
+            logging.info("[%d/%d] Filtering query: %s", i, len(queries), query)
+            filtered_query = google_search_filter_query_main(query)
+            if filtered_query:
+                filtered_queries.append(filtered_query)
+                logging.info("[%d/%d] Filtered: '%s' -> '%s'", i, len(queries), query, filtered_query)
+            else:
+                filtered_queries.append(query)
+                logging.info("[%d/%d] No filter result, using original: %s", i, len(queries), query)
+        queries = filtered_queries
 
     # Listing mode: write links and exit
     if getattr(args, "list_only", False):

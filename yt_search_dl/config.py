@@ -43,10 +43,18 @@ class RuntimeConfig:
     google_min_confidence: float = 0.3
     use_google_search_fallback: bool = False
     filter_queries_with_google: bool = False
+    use_simple_web_scraping_fallback: bool = True  # Control simple web scraping fallback
+    use_browser_based_search: bool = True  # Enable browser-based search using Selenium
     use_llm_google_parsing: bool = False
     llm_api_key: str | None = None
     llm_model: str = "gpt-3.5-turbo"
     llm_base_url: str | None = None  # For local LLMs like Ollama
+    # Google search filtering quality settings
+    google_filter_min_score: float = 30.0  # Minimum score for API results
+    google_filter_llm_min_score: float = 20.0  # Minimum score for LLM results
+    google_filter_boost_music_keywords: bool = True  # Boost music-related content
+    google_filter_penalize_spam: bool = True  # Penalize spam/ad content
+    google_filter_prefer_video_platforms: bool = True  # Boost video platform results
 
 
 # Module-global runtime configuration, populated in main()

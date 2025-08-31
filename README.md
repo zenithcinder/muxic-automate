@@ -2,6 +2,12 @@
 
 Download the first YouTube result for each query as MP3 using yt-dlp.
 
+**🚀 New Features:**
+- **Browser-based Google search** using Selenium to bypass restrictions
+- **Enhanced Google search filtering** with intelligent scoring
+- **Multiple fallback methods** for maximum reliability
+- **LLM integration** for AI-powered result parsing
+
 ### Requirements
 - Python 3.8+
 - ffmpeg installed and on PATH
@@ -31,15 +37,35 @@ Install ffmpeg for audio extraction:
 - **macOS**: `brew install ffmpeg`
 - **Windows**: Download from https://ffmpeg.org/download.html
 
+Install browsers for Google search (browser-based search):
+- **Chrome**: Recommended for best compatibility
+- **Firefox**: Alternative option (fallback)
+- **Note**: Browsers are automatically detected and used by Selenium
+
 #### Verify installation
 Test that all dependencies are working:
 ```bash
-python test_dependencies.py
+python test/test_dependencies.py
 ```
 
 Test GPU detection for AI matching:
 ```bash
-python test_gpu_detection.py
+python test/test_gpu_detection.py
+```
+
+#### Testing features
+All test scripts are located in the `test/` folder:
+```bash
+# Test dependencies and GPU
+python test/test_dependencies.py
+python test/test_gpu_detection.py
+
+# Test Google search functionality
+python test/test_google_filter.py
+python test/test_improved_google_filter.py
+python test/test_browser_search.py
+python test/test_browser_debug.py
+python test/test_google_debug.py
 ```
 
 ### Project Structure
@@ -53,8 +79,10 @@ yt_search_dl/           # Main package
 ├── matching.py         # Text matching and scoring
 ├── spotify.py          # Spotify integration
 ├── search.py           # YouTube search
+├── google_search.py    # Google search integration (API + browser-based)
 └── download.py         # Download processing
 main.py                 # CLI entry point
+test/                   # Test scripts and test data
 ```
 
 ### Usage
@@ -117,6 +145,13 @@ Useful when:
 - You want broader search results to find covers or different versions
 - You're unsure about the exact artist name
 
+### Google search integration
+- **API-based search**: Uses Google Custom Search API for reliable results
+- **Browser-based search**: Uses Selenium to bypass Google's anti-bot measures
+- **Intelligent filtering**: Multi-factor scoring system prevents gibberish results
+- **Multiple fallbacks**: Web scraping, alternative search engines, and query parsing
+- **LLM integration**: AI-powered result parsing for better accuracy
+
 ### Result filtering
 - Excludes YouTube Shorts automatically.
 - Excludes long-form videos (default: longer than 10 minutes).
@@ -159,11 +194,19 @@ Useful when:
 --google-search-engine-id Google Custom Search Engine ID (required when --use-google-search)
 --google-min-confidence Minimum confidence score for Google search enrichment (0.0-1.0, default: 0.3)
 --use-google-search-fallback Use web scraping fallback for Google search (when API is not available)
---filter-queries-with-google Filter queries through Google search first and use first result details as input
+--filter-queries-with-google Filter queries through Google search first and use best result details as input
+--use-browser-based-search Enable browser-based Google search using Selenium to bypass restrictions (default: True)
 --use-llm-google-parsing Use LLM to parse Google search results (requires --llm-api-key or --llm-base-url)
 --llm-api-key API key for LLM service (OpenAI, Anthropic, etc.) for parsing Google results
 --llm-model LLM model to use for parsing (default: gpt-3.5-turbo)
 --llm-base-url Base URL for local LLM service (e.g., http://localhost:11434 for Ollama)
+
+### Google Search Filtering Quality Options
+--google-filter-min-score Minimum score for Google search filtering API results (default: 30.0)
+--google-filter-llm-min-score Minimum score for Google search filtering LLM results (default: 20.0)
+--no-google-filter-boost-music Disable boosting of music-related content in Google filtering
+--no-google-filter-penalize-spam Disable penalizing of spam/ad content in Google filtering
+--no-google-filter-prefer-video Disable preference for video platform results in Google filtering
 ```
 
 ### Examples
@@ -257,9 +300,29 @@ Use Google search with fallback (web scraping):
 python main.py --input queries.txt --use-google-search --use-google-search-fallback
 ```
 
-Filter queries through Google search first:
+Filter queries through Google search first (improved filtering prevents gibberish results):
 ```bash
 python main.py --input queries.txt --filter-queries-with-google --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+```
+
+Use browser-based search to bypass Google restrictions (no API key needed):
+```bash
+python main.py --input queries.txt --filter-queries-with-google
+```
+
+Filter with strict quality control (only high-quality results):
+```bash
+python main.py --input queries.txt --filter-queries-with-google --google-filter-min-score 50.0 --google-filter-llm-min-score 30.0
+```
+
+Filter with lenient quality control (more results):
+```bash
+python main.py --input queries.txt --filter-queries-with-google --google-filter-min-score 20.0 --google-filter-llm-min-score 15.0
+```
+
+Customize filtering behavior:
+```bash
+python main.py --input queries.txt --filter-queries-with-google --no-google-filter-boost-music --no-google-filter-penalize-spam
 ```
 
 Combine multiple Google features for maximum accuracy:
@@ -275,6 +338,101 @@ python main.py --input queries.txt --filter-queries-with-google --use-llm-google
 Use local LLM for privacy and cost savings:
 ```bash
 python main.py --input queries.txt --filter-queries-with-google --use-llm-google-parsing --llm-base-url http://localhost:11434 --llm-model llama2
+```
+
+### Browser-Based Google Search (New!)
+
+**🚀 Major Improvement**: The system now includes **browser-based Google search** using Selenium to bypass search engine restrictions and anti-bot measures.
+
+#### Why Browser-Based Search?
+
+- **Bypasses Google's anti-bot measures** that block simple web scraping
+- **Handles JavaScript-rendered content** that static requests can't access
+- **More reliable than web scraping** approaches
+- **Real browser behavior** - appears as legitimate user traffic
+- **Configurable** - can be disabled if needed
+
+#### How It Works
+
+The browser-based search:
+1. **Launches a real Chrome/Firefox browser** (headless mode)
+2. **Navigates to Google search** with proper headers and user agent
+3. **Waits for results to load** (handles dynamic content)
+4. **Extracts search results** using modern CSS selectors
+5. **Closes browser** automatically when done
+
+#### Configuration
+
+```bash
+# Enable browser-based search (default: enabled)
+--use-browser-based-search
+
+# Disable browser-based search if needed
+--no-use-browser-based-search
+```
+
+#### Requirements
+
+- **Selenium**: Automatically installed with `pip install -r requirements.txt`
+- **Chrome/ChromeDriver**: Chrome browser must be installed
+- **Firefox/GeckoDriver**: Firefox browser as fallback option
+
+#### Fallback System
+
+The system uses a **layered approach** for maximum reliability:
+
+1. **Google API** (if credentials provided)
+2. **Direct Web Scraping** (often blocked by Google)
+3. **🆕 Browser-Based Search** (using Selenium - most likely to succeed)
+4. **Alternative Search Engines** (DuckDuckGo, Bing)
+5. **Query Parsing Fallback** (always works for structured queries)
+
+### Improved Google Search Filtering
+
+#### Key Features:
+
+- **Intelligent Scoring System**: Multi-factor evaluation based on:
+  - Music-related keyword presence
+  - Video platform preference (YouTube, Spotify, etc.)
+  - Spam and advertisement detection
+  - Title length and formatting quality
+  - Word overlap with original query
+  - Position in search results
+
+- **Configurable Quality Thresholds**: 
+  - `--google-filter-min-score`: Control API result quality (default: 30.0)
+  - `--google-filter-llm-min-score`: Control LLM result quality (default: 20.0)
+
+- **Smart Content Filtering**:
+  - **Boosts**: Music keywords, video platforms, proper capitalization
+  - **Penalizes**: Spam patterns, excessive punctuation, all-caps, very long/short titles
+  - **Validates**: Word overlap, reasonable length limits
+
+- **Customizable Behavior**:
+  - `--no-google-filter-boost-music`: Disable music content boosting
+  - `--no-google-filter-penalize-spam`: Disable spam content filtering
+  - `--no-google-filter-prefer-video`: Disable video platform preference
+
+#### Quality Levels:
+
+- **Strict (50.0+)**: Only high-quality, highly relevant results
+- **Balanced (30.0+)**: Good quality with reasonable coverage (default)
+- **Lenient (20.0+)**: More results, lower quality threshold
+
+#### Example Configurations:
+
+```bash
+# High-quality filtering only
+--google-filter-min-score 50.0 --google-filter-llm-min-score 30.0
+
+# Balanced filtering (default)
+--google-filter-min-score 30.0 --google-filter-llm-min-score 20.0
+
+# Lenient filtering for maximum coverage
+--google-filter-min-score 20.0 --google-filter-llm-min-score 15.0
+
+# Custom behavior
+--no-google-filter-boost-music --no-google-filter-penalize-spam
 ```
 
 ### Audio Quality and Formats
@@ -301,6 +459,47 @@ python main.py --input songs.txt --audio-format m4a --audio-quality best
 # Lossless FLAC
 python main.py --input songs.txt --audio-format flac
 ```
+
+### Testing the Browser-Based Search
+
+You can test the new browser-based search functionality with the provided test scripts:
+
+```bash
+# Test browser-based search directly
+python test/test_browser_search.py
+
+# Debug browser HTML structure
+python test/test_browser_debug.py
+
+# Test full Google search functionality
+python test/test_google_debug.py
+```
+
+**Note**: Make sure you have Chrome or Firefox installed for browser-based search to work.
+
+### Testing the Improved Google Search Filtering
+
+You can test the enhanced filtering functionality using the included test scripts:
+
+```bash
+# Test the improved Google search filtering
+python test/test_improved_google_filter.py
+
+# Test browser-based search functionality
+python test/test_browser_search.py
+
+# Debug browser HTML structure
+python test/test_browser_debug.py
+
+# Test full Google search functionality
+python test/test_google_debug.py
+```
+
+This will demonstrate:
+- Different quality threshold configurations
+- Customizable filtering behavior
+- How the scoring system works
+- Example usage patterns
 
 ### YouTube Authentication (Age Restrictions)
 
@@ -355,17 +554,26 @@ python main.py --input songs.txt --use-google-search --use-google-search-fallbac
 
 **Note**: The fallback method is less reliable and may be rate-limited by Google.
 
-### Google Query Filtering
+### Google Query Filtering (Improved)
 
-Google query filtering takes your input queries and refines them using Google search results before searching YouTube. This helps improve accuracy by using Google's search results to correct and enhance your queries.
+Google query filtering takes your input queries and intelligently refines them using Google search results before searching YouTube. The system has been significantly enhanced to prevent gibberish results and provide high-quality, relevant search results.
 
 #### How it works
 
 1. **Reads queries** from your input file
 2. **Searches Google** for each query using Google Custom Search API
-3. **Extracts the first result's title** from Google search results
-4. **Uses that title** as the new query for YouTube search
-5. **Falls back gracefully** if Google search fails (uses original query)
+3. **Intelligently scores and validates** all search results using multi-factor analysis
+4. **Selects the best result** based on quality scoring instead of just the first result
+5. **Uses the best result's title** as the new query for YouTube search
+6. **Falls back gracefully** if Google search fails (uses original query)
+
+#### Intelligent Filtering Features
+
+- **Multi-factor scoring**: Evaluates results based on relevance, quality, and music-specific factors
+- **Spam detection**: Automatically filters out advertisements, spam, and low-quality content
+- **Music optimization**: Boosts results from music platforms and music-related content
+- **Quality thresholds**: Configurable minimum scores for different quality levels
+- **Smart fallbacks**: Multiple fallback methods including web scraping and LLM parsing
 
 #### Setup
 
@@ -386,6 +594,34 @@ Same setup as Google Search Enrichment (requires Google Custom Search API):
    ```bash
    python main.py --input songs.txt --filter-queries-with-google --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
    ```
+
+#### Advanced Configuration Options
+
+The improved filtering system offers extensive customization:
+
+**Quality Control**:
+```bash
+# Strict filtering (high quality only)
+--google-filter-min-score 50.0 --google-filter-llm-min-score 30.0
+
+# Balanced filtering (default)
+--google-filter-min-score 30.0 --google-filter-llm-min-score 20.0
+
+# Lenient filtering (more results)
+--google-filter-min-score 20.0 --google-filter-llm-min-score 15.0
+```
+
+**Customize Behavior**:
+```bash
+# Disable music content boosting
+--no-google-filter-boost-music
+
+# Allow spam/ad content
+--no-google-filter-penalize-spam
+
+# Disable video platform preference
+--no-google-filter-prefer-video
+```
 
 #### Example workflow
 
@@ -597,3 +833,21 @@ python main.py \
 - Duration similarity (when Spotify enrichment is enabled)
 - Popularity via views (log-scaled)
 - Bonuses/penalties: prefer official; downrank live, mixes/playlists, full albums, visualizers; filter Shorts and >10min by default
+
+### Recent Improvements
+
+#### Enhanced Google Search Filtering (v2.0)
+The Google search filtering system has been completely overhauled to provide significantly better results:
+
+**Before**: Simple first-result extraction that often returned gibberish, ads, or irrelevant content
+**After**: Intelligent multi-factor scoring system that evaluates result quality and relevance
+
+**Key Improvements**:
+- ✅ **Intelligent Scoring**: Multi-factor evaluation based on content quality, relevance, and music-specific factors
+- ✅ **Spam Detection**: Automatic filtering of advertisements, spam, and low-quality content
+- ✅ **Music Optimization**: Boosts results from music platforms and music-related content
+- ✅ **Configurable Quality**: Adjustable thresholds for strict, balanced, or lenient filtering
+- ✅ **Smart Fallbacks**: Multiple fallback methods including web scraping and LLM parsing
+- ✅ **Customizable Behavior**: Fine-tune filtering behavior to match your needs
+
+**Result**: No more gibberish results - only high-quality, relevant search results that actually improve your YouTube searches.

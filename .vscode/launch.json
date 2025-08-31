@@ -1,0 +1,157 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Debug main.py (Basic)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--input", "inputs/songs.txt",
+                "--output", "downloads",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Debug main.py (Deep Search)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--input", "inputs/songs.txt",
+                "--output", "downloads",
+                "--deep-search",
+                "--search-count", "25",
+                "--debug-matching",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Debug main.py (List Only)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--input", "inputs/songs.txt",
+                "--list-only",
+                "--list-output", "debug_links.txt",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Debug main.py (Custom Args)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--input", "inputs/songs.txt",
+                "--output", "downloads",
+                "--search-without-authors",
+                "--use-ai-match",
+                "--debug-matching",
+                "--debug-topk", "5",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Debug main.py (Google Search Fallback)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--input", "inputs/queries2.txt",
+                "--cookies-file", "cookies.txt",
+                "--filter-queries-with-google",
+                "--deep-search",
+                "--search-count", "20",
+                "--output", "downloads",
+                "--debug-matching",
+                "--debug-topk", "10",
+                "--log-level", "DEBUG",
+                "--use-google-search-fallback"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Debug search.py",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/yt_search_dl/search.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Attach",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "."
+                }
+            ]
+        }
+    ]
+}
