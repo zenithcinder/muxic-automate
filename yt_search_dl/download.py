@@ -15,23 +15,33 @@ from .search import search_video_url, collect_search_urls
 from .utils import ensure_ffmpeg_available
 
 
-def build_ydl_opts(output_dir: Path, rate_limit_kbps: int | None) -> dict:
-    """Create yt-dlp options for MP3 extraction and logging."""
-    # Template: Title.mp3 inside output directory
+def build_ydl_opts(output_dir: Path, rate_limit_kbps: int | None, audio_quality: str = "192", audio_format: str = "mp3", cookies_file: str | None = None) -> dict:
+    """Create yt-dlp options for audio extraction and logging.
+    
+    Args:
+        output_dir: Directory to save files
+        rate_limit_kbps: Download speed limit in kbps
+        audio_quality: Audio quality in kbps (e.g., "192", "320", "best")
+        audio_format: Audio format ("mp3", "m4a", "opus", "flac")
+        cookies_file: Path to cookies.txt file for authentication
+    """
+    # Template: Title.ext inside output directory
     outtmpl = str(output_dir / "%(title)s.%(ext)s")
+    
+    # Configure format selection based on desired quality
+    if audio_quality == "best":
+        # Get the best available audio quality
+        format_spec = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
+    else:
+        # Try to get specific quality, fallback to best
+        format_spec = f"bestaudio[height<={audio_quality}]/bestaudio/best"
+    
     ydl_opts: dict = {
         "quiet": True,
         "noprogress": True,
         "outtmpl": outtmpl,
-        "format": "bestaudio/best",
+        "format": format_spec,
         "nocheckcertificate": True,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }
-        ],
         # Write metadata & thumbnail into the file when possible
         "writethumbnail": True,
         "embedthumbnail": True,
@@ -45,6 +55,53 @@ def build_ydl_opts(output_dir: Path, rate_limit_kbps: int | None) -> dict:
         "fragment_retries": 3,
         "socket_timeout": 20,
     }
+    
+    # Add cookies file for authentication (handles age restrictions)
+    if cookies_file:
+        ydl_opts["cookiefile"] = cookies_file
+        logging.debug("Using cookies file for authentication: %s", cookies_file)
+    
+    # Configure postprocessors based on desired format
+    if audio_format.lower() == "mp3":
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": audio_quality,
+            }
+        ]
+    elif audio_format.lower() == "m4a":
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "m4a",
+                "preferredquality": audio_quality,
+            }
+        ]
+    elif audio_format.lower() == "opus":
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "opus",
+                "preferredquality": audio_quality,
+            }
+        ]
+    elif audio_format.lower() == "flac":
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "flac",
+            }
+        ]
+    else:
+        # Default to MP3
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": audio_quality,
+            }
+        ]
 
     if rate_limit_kbps and rate_limit_kbps > 0:
         # yt-dlp expects bytes per second
@@ -94,8 +151,8 @@ def process_queries(
     """Process queries and download results."""
     ensure_ffmpeg_available()
     output_dir.mkdir(parents=True, exist_ok=True)
-    ydl_opts = build_ydl_opts(output_dir, rate_limit_kbps)
     config = get_runtime_config()
+    ydl_opts = build_ydl_opts(output_dir, rate_limit_kbps, config.audio_quality, config.audio_format, config.cookies_file)
 
     # Worker function for one query
     def process_one(args_tuple: tuple[int, str]) -> DownloadResult:
@@ -148,10 +205,11 @@ def process_urls(
     rate_limit_kbps: int | None,
     concurrency: int = 1,
 ) -> List[DownloadResult]:
-    """Download a list of direct video URLs as MP3 using yt-dlp."""
+    """Download a list of direct video URLs as audio using yt-dlp."""
     ensure_ffmpeg_available()
     output_dir.mkdir(parents=True, exist_ok=True)
-    ydl_opts = build_ydl_opts(output_dir, rate_limit_kbps)
+    config = get_runtime_config()
+    ydl_opts = build_ydl_opts(output_dir, rate_limit_kbps, config.audio_quality, config.audio_format, config.cookies_file)
 
     def process_one(args_tuple: tuple[int, str]) -> DownloadResult:
         idx, url = args_tuple

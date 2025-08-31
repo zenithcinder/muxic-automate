@@ -13,12 +13,24 @@ from typing import List
 def configure_logging(verbosity: str, log_file: Path) -> None:
     """Configure root logger with console and file handlers.
 
+    This function sets up a comprehensive logging system that writes to both
+    the console and a log file. It configures the root logger to handle
+    different verbosity levels and formats messages consistently.
+
     Parameters
     ----------
     verbosity: str
         One of DEBUG, INFO, WARNING, ERROR.
     log_file: Path
         File path to write detailed logs.
+
+    Examples
+    --------
+    >>> configure_logging("INFO", Path("logs/app.log"))
+    # Sets up logging with INFO level, writes to console and logs/app.log
+    
+    >>> configure_logging("DEBUG", Path("debug.log"))
+    # Sets up detailed DEBUG logging for troubleshooting
     """
     level = getattr(logging, verbosity.upper(), logging.INFO)
     log_format = "%(asctime)s | %(levelname)-8s | %(message)s"
@@ -45,7 +57,41 @@ def configure_logging(verbosity: str, log_file: Path) -> None:
 
 
 def read_queries(file_path: Path) -> List[str]:
-    """Read non-empty, non-comment lines from a file as queries."""
+    """Read non-empty, non-comment lines from a file as queries.
+    
+    This function reads a text file and extracts valid search queries,
+    skipping empty lines and comments (lines starting with #).
+    Useful for batch processing multiple search terms.
+
+    Parameters
+    ----------
+    file_path: Path
+        Path to the text file containing search queries.
+
+    Returns
+    -------
+    List[str]
+        List of non-empty, non-comment lines from the file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified file doesn't exist.
+
+    Examples
+    --------
+    # File: queries.txt
+    # # This is a comment
+    # 
+    # Ed Sheeran Shape of You
+    # The Weeknd Blinding Lights
+    # 
+    # Another comment
+    
+    >>> queries = read_queries(Path("queries.txt"))
+    >>> print(queries)
+    ['Ed Sheeran Shape of You', 'The Weeknd Blinding Lights']
+    """
     if not file_path.exists():
         raise FileNotFoundError(f"Input file not found: {file_path}")
     queries: List[str] = []
@@ -59,7 +105,18 @@ def read_queries(file_path: Path) -> List[str]:
 
 
 def ensure_ffmpeg_available() -> None:
-    """Best-effort check that ffmpeg is available on PATH."""
+    """Best-effort check that ffmpeg is available on PATH.
+    
+    This function checks if ffmpeg is installed and accessible from the
+    system PATH. It logs a warning if ffmpeg is not found, as it's
+    required for audio extraction and conversion operations.
+
+    Examples
+    --------
+    >>> ensure_ffmpeg_available()
+    # If ffmpeg is found: No output
+    # If ffmpeg is missing: WARNING: ffmpeg not found on PATH...
+    """
     from shutil import which
 
     if which("ffmpeg") is None:
@@ -69,7 +126,37 @@ def ensure_ffmpeg_available() -> None:
 
 
 def _normalize_text(text: str) -> str:
-    """Lowercase, strip punctuation and extra whitespace for robust matching."""
+    """Lowercase, strip punctuation and extra whitespace for robust matching.
+    
+    This function normalizes text for consistent comparison by:
+    1. Converting to lowercase using Unicode-aware case folding
+    2. Normalizing Unicode characters (NFKC form)
+    3. Removing all non-alphanumeric characters
+    4. Collapsing multiple spaces into single spaces
+    
+    This ensures that "Hello, World!" and "hello world" are treated as equivalent.
+
+    Parameters
+    ----------
+    text: str
+        The text string to normalize.
+
+    Returns
+    -------
+    str
+        Normalized text string.
+
+    Examples
+    --------
+    >>> _normalize_text("Hello, World! (Official Video)")
+    'hello world official video'
+    
+    >>> _normalize_text("The Beatles - Hey Jude (Remix)")
+    'the beatles hey jude remix'
+    
+    >>> _normalize_text("   Multiple    Spaces   ")
+    'multiple spaces'
+    """
     # Unicode-aware folding and normalization for non-Latin scripts (e.g., Cyrillic)
     lowered = unicodedata.normalize("NFKC", text).casefold().strip()
     # Replace any non-alphanumeric (unicode aware) with space
@@ -79,7 +166,33 @@ def _normalize_text(text: str) -> str:
 
 
 def _strip_common_noise(text: str) -> str:
-    """Remove frequent noise terms in YouTube titles (e.g., official video, lyrics)."""
+    """Remove frequent noise terms in YouTube titles (e.g., official video, lyrics).
+    
+    This function removes common terms that appear in YouTube video titles
+    but don't contribute to the actual song/artist identification. It helps
+    improve matching accuracy by focusing on the core content.
+
+    Parameters
+    ----------
+    text: str
+        The text string to clean.
+
+    Returns
+    -------
+    str
+        Text with noise terms removed and normalized.
+
+    Examples
+    --------
+    >>> _strip_common_noise("Shape of You - Ed Sheeran (Official Video)")
+    'shape of you ed sheeran'
+    
+    >>> _strip_common_noise("Blinding Lights - The Weeknd (Lyrics)")
+    'blinding lights the weeknd'
+    
+    >>> _strip_common_noise("Song Title (Official Music Video) [HD]")
+    'song title'
+    """
     noise_patterns = [
         r"\bofficial\b",
         r"\bvideo\b",
@@ -105,18 +218,94 @@ def _strip_common_noise(text: str) -> str:
 
 
 def _tokenize(text: str) -> list[str]:
-    """Tokenize text into words."""
+    """Tokenize text into words.
+    
+    This function splits normalized text into individual word tokens,
+    filtering out empty strings. Used for more granular text analysis
+    and comparison.
+
+    Parameters
+    ----------
+    text: str
+        The text string to tokenize.
+
+    Returns
+    -------
+    list[str]
+        List of word tokens.
+
+    Examples
+    --------
+    >>> _tokenize("Hello, World! How are you?")
+    ['hello', 'world', 'how', 'are', 'you']
+    
+    >>> _tokenize("The Beatles - Hey Jude")
+    ['the', 'beatles', 'hey', 'jude']
+    """
     norm = _normalize_text(text)
     return [t for t in norm.split(" ") if t]
 
 
 def _token_set_string(tokens: list[str]) -> str:
-    """Convert token list to sorted unique string."""
+    """Convert token list to sorted unique string.
+    
+    This function creates a canonical representation of tokens by:
+    1. Removing duplicates (converting to set)
+    2. Sorting alphabetically
+    3. Joining with spaces
+    
+    This ensures that "hello world" and "world hello" produce the same result.
+
+    Parameters
+    ----------
+    tokens: list[str]
+        List of word tokens.
+
+    Returns
+    -------
+    str
+        Sorted, unique tokens joined with spaces.
+
+    Examples
+    --------
+    >>> _token_set_string(['hello', 'world', 'hello'])
+    'hello world'
+    
+    >>> _token_set_string(['the', 'beatles', 'hey', 'jude'])
+    'beatles hey jude the'
+    """
     return " ".join(sorted(set(tokens)))
 
 
 def _non_alnum_ratio(text: str) -> float:
-    """Calculate ratio of non-alphanumeric characters."""
+    """Calculate ratio of non-alphanumeric characters.
+    
+    This function calculates what percentage of characters in a string
+    are non-alphanumeric (punctuation, symbols, etc.). Useful for
+    detecting overly complex or noisy text that might be less reliable
+    for matching.
+
+    Parameters
+    ----------
+    text: str
+        The text string to analyze.
+
+    Returns
+    -------
+    float
+        Ratio of non-alphanumeric characters (0.0 to 1.0).
+
+    Examples
+    --------
+    >>> _non_alnum_ratio("Hello World")
+    0.0  # No non-alphanumeric characters
+    
+    >>> _non_alnum_ratio("Hello, World!")
+    0.25  # 3 non-alphanumeric chars out of 12 total
+    
+    >>> _non_alnum_ratio("!!!@@@###")
+    1.0  # All characters are non-alphanumeric
+    """
     if not text:
         return 0.0
     total = len(text)
@@ -125,7 +314,35 @@ def _non_alnum_ratio(text: str) -> float:
 
 
 def _similarity(a: str, b: str) -> float:
-    """Return similarity ratio in [0, 1] using difflib."""
+    """Return similarity ratio in [0, 1] using difflib.
+    
+    This function calculates the similarity between two strings using
+    Python's difflib.SequenceMatcher. Returns a value between 0.0
+    (completely different) and 1.0 (identical).
+
+    Parameters
+    ----------
+    a: str
+        First string to compare.
+    b: str
+        Second string to compare.
+
+    Returns
+    -------
+    float
+        Similarity ratio between 0.0 and 1.0.
+
+    Examples
+    --------
+    >>> _similarity("hello world", "hello world")
+    1.0  # Identical strings
+    
+    >>> _similarity("hello world", "hello there")
+    0.5454545454545454  # Partial similarity
+    
+    >>> _similarity("hello", "goodbye")
+    0.0  # No similarity
+    """
     from difflib import SequenceMatcher
 
     if not a or not b:
@@ -134,7 +351,37 @@ def _similarity(a: str, b: str) -> float:
 
 
 def _token_jaccard(a_tokens: list[str], b_tokens: list[str]) -> float:
-    """Calculate Jaccard similarity between token sets."""
+    """Calculate Jaccard similarity between token sets.
+    
+    This function calculates the Jaccard similarity coefficient between
+    two sets of tokens. The Jaccard index is the size of the intersection
+    divided by the size of the union of the two sets.
+    
+    Jaccard = |A ∩ B| / |A ∪ B|
+
+    Parameters
+    ----------
+    a_tokens: list[str]
+        First list of tokens.
+    b_tokens: list[str]
+        Second list of tokens.
+
+    Returns
+    -------
+    float
+        Jaccard similarity between 0.0 and 1.0.
+
+    Examples
+    --------
+    >>> _token_jaccard(['hello', 'world'], ['hello', 'world'])
+    1.0  # Identical token sets
+    
+    >>> _token_jaccard(['hello', 'world'], ['hello', 'there'])
+    0.3333333333333333  # 1 common token out of 3 total unique tokens
+    
+    >>> _token_jaccard(['hello'], ['world'])
+    0.0  # No common tokens
+    """
     set_a = set(a_tokens)
     set_b = set(b_tokens)
     if not set_a and not set_b:
@@ -145,7 +392,30 @@ def _token_jaccard(a_tokens: list[str], b_tokens: list[str]) -> float:
 
 
 def _build_query_variants(query_text: str) -> list[str]:
-    """Build normalized variants of the query for robust exact matching."""
+    """Build normalized variants of the query for robust exact matching.
+    
+    This function creates multiple normalized versions of a query to
+    improve matching accuracy. It generates variants that handle
+    different ways the same content might be formatted or described.
+
+    Parameters
+    ----------
+    query_text: str
+        The original query text.
+
+    Returns
+    -------
+    list[str]
+        List of normalized query variants.
+
+    Examples
+    --------
+    >>> _build_query_variants("Shape of You - Ed Sheeran (Official Video)")
+    ['shape of you ed sheeran official video', 'shape of you ed sheeran', 'ed sheeran shape of you']
+    
+    >>> _build_query_variants("The Beatles - Hey Jude")
+    ['the beatles hey jude', 'hey jude', 'beatles hey jude the']
+    """
     variants = set()
     variants.add(_normalize_text(query_text))
     variants.add(_strip_common_noise(query_text))
@@ -157,7 +427,33 @@ def _build_query_variants(query_text: str) -> list[str]:
 def _extract_title_from_query(query_text: str) -> str:
     """Extract just the title part from a query, removing author information.
     
-    This function removes common author separators and returns just the title portion.
+    This function attempts to extract the song title from a query that
+    might contain artist information. It removes common author separators
+    and artist indicators to isolate the actual title.
+
+    Parameters
+    ----------
+    query_text: str
+        The query text that may contain both title and artist information.
+
+    Returns
+    -------
+    str
+        The extracted title portion of the query.
+
+    Examples
+    --------
+    >>> _extract_title_from_query("Shape of You by Ed Sheeran")
+    'shape of you'
+    
+    >>> _extract_title_from_query("Blinding Lights - The Weeknd")
+    'blinding lights'
+    
+    >>> _extract_title_from_query("Hey Jude (The Beatles)")
+    'hey jude'
+    
+    >>> _extract_title_from_query("Song Title feat. Artist")
+    'song title'
     """
     text = _normalize_text(query_text)
     

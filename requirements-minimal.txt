@@ -1,0 +1,11 @@
+# Minimal requirements for core functionality only
+# Use this if you don't need AI semantic matching
+
+# Core dependencies
+yt-dlp>=2024.10,<2026.0
+
+# System dependencies (not pip installable):
+# - ffmpeg: Required for audio extraction (install via system package manager)
+#   Ubuntu/Debian: sudo apt install ffmpeg
+#   macOS: brew install ffmpeg
+#   Windows: Download from https://ffmpeg.org/download.html

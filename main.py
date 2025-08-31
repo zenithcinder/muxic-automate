@@ -16,6 +16,7 @@ from yt_search_dl import (
     read_queries, configure_logging, set_runtime_config
 )
 from yt_search_dl.download import list_results_to_file
+from yt_search_dl.google_search import google_search_filter_query_main
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -33,8 +34,11 @@ Examples:
   # Search with title only (removes artist names)
   python main.py --input songs.txt --search-without-authors
   
-  # Combine both features for maximum coverage
-  python main.py --input songs.txt --deep-search --search-without-authors
+  # Filter queries through Google search first
+  python main.py --input songs.txt --filter-queries-with-google --google-api-key YOUR_KEY --google-search-engine-id YOUR_ID
+  
+  # Combine multiple features for maximum coverage
+  python main.py --input songs.txt --deep-search --search-without-authors --filter-queries-with-google
         """
     )
     parser.add_argument("--input", required=True, help="Path to queries file (one query per line)")
@@ -145,6 +149,68 @@ Examples:
         action="store_true",
         help="Remove author/artist names from queries and search with just the title",
     )
+    parser.add_argument(
+        "--audio-quality",
+        default="192",
+        help="Audio quality in kbps (e.g., 192, 320) or 'best' for highest available",
+    )
+    parser.add_argument(
+        "--audio-format",
+        default="mp3",
+        choices=["mp3", "m4a", "opus", "flac"],
+        help="Audio format for output files",
+    )
+    parser.add_argument(
+        "--cookies-file",
+        help="Path to cookies.txt file for YouTube authentication (handles age restrictions)",
+    )
+    parser.add_argument(
+        "--use-google-search",
+        action="store_true",
+        help="Use Google search to enrich queries with additional context",
+    )
+    parser.add_argument(
+        "--google-api-key",
+        help="Google Custom Search API key (required when --use-google-search)",
+    )
+    parser.add_argument(
+        "--google-search-engine-id",
+        help="Google Custom Search Engine ID (required when --use-google-search)",
+    )
+    parser.add_argument(
+        "--google-min-confidence",
+        type=float,
+        default=0.3,
+        help="Minimum confidence score for Google search enrichment (0.0-1.0, default: 0.3)",
+    )
+    parser.add_argument(
+        "--use-google-search-fallback",
+        action="store_true",
+        help="Use web scraping fallback for Google search (when API is not available)",
+    )
+    parser.add_argument(
+        "--filter-queries-with-google",
+        action="store_true",
+        help="Filter queries through Google search first and use first result details as input",
+    )
+    parser.add_argument(
+        "--use-llm-google-parsing",
+        action="store_true",
+        help="Use LLM to parse Google search results (requires --llm-api-key)",
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        help="API key for LLM service (OpenAI, Anthropic, etc.) for parsing Google results",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default="gpt-3.5-turbo",
+        help="LLM model to use for parsing (default: gpt-3.5-turbo)",
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        help="Base URL for local LLM service (e.g., http://localhost:11434 for Ollama)",
+    )
     return parser.parse_args(argv)
 
 
@@ -166,15 +232,42 @@ def main(argv: List[str] | None = None) -> int:
         logging.info("Deep search mode enabled: will consider up to 50 results")
     if args.search_without_authors:
         logging.info("Title-only search enabled: will remove author names from queries")
+    if args.audio_quality != "192" or args.audio_format != "mp3":
+        logging.info("Audio settings: quality=%s, format=%s", args.audio_quality, args.audio_format)
+    if getattr(args, "cookies_file", None):
+        logging.info("Using cookies file for authentication: %s", args.cookies_file)
+    if args.use_google_search:
+        logging.info("Google search enrichment enabled")
+        if args.use_google_search_fallback:
+            logging.info("Google search fallback (web scraping) enabled")
+    if args.filter_queries_with_google:
+        logging.info("Google query filtering enabled: will filter queries through Google search first")
+    if args.use_llm_google_parsing:
+        logging.info("LLM Google parsing enabled: will use LLM to parse search results")
 
     try:
         queries = read_queries(input_path)
         if not queries:
             logging.warning("No queries found in %s", input_path)
             return 0
-    except Exception as error:  # noqa: BLE001
+    except Exception as error: # noqa: BLE001
         logging.error("Failed to read queries: %s", error)
         return 1
+
+    # Apply Google search filtering if enabled
+    if args.filter_queries_with_google:
+        logging.info("Applying Google search filtering to %d queries...", len(queries))
+        filtered_queries = []
+        for i, query in enumerate(queries, 1):
+            logging.info("[%d/%d] Filtering query: %s", i, len(queries), query)
+            filtered_query = google_search_filter_query_main(query)
+            if filtered_query:
+                filtered_queries.append(filtered_query)
+                logging.info("[%d/%d] Filtered: '%s' -> '%s'", i, len(queries), query, filtered_query)
+            else:
+                filtered_queries.append(query)
+                logging.info("[%d/%d] No filter result, using original: %s", i, len(queries), query)
+        queries = filtered_queries
 
     # Set runtime configuration
     config = RuntimeConfig(
@@ -191,6 +284,19 @@ def main(argv: List[str] | None = None) -> int:
         debug_top_k=int(args.debug_topk),
         deep_search=bool(args.deep_search),
         search_without_authors=bool(args.search_without_authors),
+        audio_quality=str(args.audio_quality),
+        audio_format=str(args.audio_format),
+        cookies_file=str(args.cookies_file) if getattr(args, "cookies_file", None) else None,
+        use_google_search=bool(args.use_google_search),
+        google_api_key=str(args.google_api_key) if getattr(args, "google_api_key", None) else None,
+        google_search_engine_id=str(args.google_search_engine_id) if getattr(args, "google_search_engine_id", None) else None,
+        google_min_confidence=float(args.google_min_confidence),
+        use_google_search_fallback=bool(args.use_google_search_fallback),
+        filter_queries_with_google=bool(args.filter_queries_with_google),
+        use_llm_google_parsing=bool(args.use_llm_google_parsing),
+        llm_api_key=str(args.llm_api_key) if getattr(args, "llm_api_key", None) else None,
+        llm_model=str(args.llm_model),
+        llm_base_url=str(args.llm_base_url) if getattr(args, "llm_base_url", None) else None,
     )
     set_runtime_config(config)
 

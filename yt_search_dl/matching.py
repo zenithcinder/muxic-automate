@@ -8,8 +8,14 @@ from typing import List, Dict, Any
 
 from .config import get_runtime_config, get_embed_model, set_embed_model
 from .utils import (
-    _normalize_text, _strip_common_noise, _tokenize, _token_set_string,
-    _non_alnum_ratio, _similarity, _token_jaccard, _build_query_variants
+    _normalize_text,
+    _strip_common_noise,
+    _tokenize,
+    _token_set_string,
+    _non_alnum_ratio,
+    _similarity,
+    _token_jaccard,
+    _build_query_variants,
 )
 
 
@@ -48,6 +54,33 @@ def _views_score(entry: dict) -> float:
     return max(0.0, min(1.0, math.log10(views + 1) / 6.0))
 
 
+def _get_preferred_device() -> str:
+    """Determine the preferred device for the embed model, preferring GPU if available."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            # Check if CUDA is properly configured
+            try:
+                # Test if we can create a tensor on GPU
+                test_tensor = torch.tensor([1.0], device="cuda")
+                del test_tensor  # Clean up
+                return "cuda"
+            except Exception:
+                logging.debug(
+                    "CUDA available but failed to create test tensor, falling back to CPU"
+                )
+                return "cpu"
+        else:
+            return "cpu"
+    except ImportError:
+        # PyTorch not available, use CPU
+        return "cpu"
+    except Exception:
+        # Any other error, fall back to CPU
+        return "cpu"
+
+
 def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
     """Load sentence-transformers model once if AI match is enabled."""
     model = get_embed_model()
@@ -56,26 +89,81 @@ def _ensure_embed_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
     except Exception as import_error:  # noqa: BLE001
-        logging.error("AI matching requested but 'sentence-transformers' is not installed: %s", import_error)
+        logging.error(
+            "AI matching requested but 'sentence-transformers' is not installed: %s",
+            import_error,
+        )
         return None
-    # Prefer CPU to avoid device/meta tensor issues in some PyTorch builds
-    preferred_device = "cpu"
+
+    # Try GPU first, fallback to CPU if needed
+    preferred_device = _get_preferred_device()
+
     try:
         model = SentenceTransformer(model_name, device=preferred_device)
         set_embed_model(model)
-        logging.info("AI matching: loaded model on %s: %s", preferred_device, model_name)
+        logging.info(
+            "AI matching: loaded model on %s: %s", preferred_device, model_name
+        )
     except Exception as load_error:  # noqa: BLE001
-        logging.error("Failed to load AI model '%s': %s", model_name, load_error)
+        logging.warning(
+            "Failed to load AI model '%s' on %s: %s",
+            model_name,
+            preferred_device,
+            load_error,
+        )
+
+        # If GPU failed, try CPU as fallback
+        if preferred_device != "cpu":
+            try:
+                logging.info("Retrying with CPU device...")
+                model = SentenceTransformer(model_name, device="cpu")
+                set_embed_model(model)
+                logging.info("AI matching: loaded model on cpu: %s", model_name)
+            except Exception as cpu_load_error:  # noqa: BLE001
+                logging.error(
+                    "Failed to load AI model '%s' on CPU: %s",
+                    model_name,
+                    cpu_load_error,
+                )
+                # Continue to fallback model
+        else:
+            # CPU already failed, continue to fallback model
+            pass
+
         # Fallback to a smaller, widely compatible model
         fallback = "sentence-transformers/all-MiniLM-L6-v2"
         if model_name != fallback:
             try:
                 model = SentenceTransformer(fallback, device=preferred_device)
                 set_embed_model(model)
-                logging.warning("AI matching: falling back to model on %s: %s", preferred_device, fallback)
+                logging.warning(
+                    "AI matching: falling back to model on %s: %s",
+                    preferred_device,
+                    fallback,
+                )
             except Exception as fallback_error:  # noqa: BLE001
-                logging.error("Failed to load fallback AI model '%s': %s", fallback, fallback_error)
-                set_embed_model(None)
+                # Try CPU for fallback model too
+                if preferred_device != "cpu":
+                    try:
+                        model = SentenceTransformer(fallback, device="cpu")
+                        set_embed_model(model)
+                        logging.warning(
+                            "AI matching: falling back to model on cpu: %s", fallback
+                        )
+                    except Exception as cpu_fallback_error:  # noqa: BLE001
+                        logging.error(
+                            "Failed to load fallback AI model '%s' on CPU: %s",
+                            fallback,
+                            cpu_fallback_error,
+                        )
+                        set_embed_model(None)
+                else:
+                    logging.error(
+                        "Failed to load fallback AI model '%s': %s",
+                        fallback,
+                        fallback_error,
+                    )
+                    set_embed_model(None)
         else:
             set_embed_model(None)
     return get_embed_model()
@@ -89,7 +177,9 @@ def _ai_similarity_score(query_text: str, title: str, authors_text: str) -> floa
     config = get_runtime_config()
     if not config.use_ai_match:
         return 0.0
-    model = _ensure_embed_model(config.ai_model_name or "sentence-transformers/all-MiniLM-L6-v2")
+    model = _ensure_embed_model(
+        config.ai_model_name or "sentence-transformers/all-MiniLM-L6-v2"
+    )
     if model is None:
         return 0.0
     try:
@@ -97,7 +187,9 @@ def _ai_similarity_score(query_text: str, title: str, authors_text: str) -> floa
         import numpy as np  # type: ignore
 
         query_vec = model.encode([query_text], normalize_embeddings=True)
-        cand_vec = model.encode([f"{title} | {authors_text}"], normalize_embeddings=True)
+        cand_vec = model.encode(
+            [f"{title} | {authors_text}"], normalize_embeddings=True
+        )
         # Cosine similarity because vectors are normalized
         sim = float(np.dot(query_vec[0], cand_vec[0]))
         # Clamp numerical edge cases
@@ -152,7 +244,18 @@ def _extract_author_tokens_from_query(query_text: str) -> list[str]:
     for chunk in candidates:
         tokens.extend(_tokenize(chunk))
     # Remove common non-author tokens
-    noisy = {"official", "video", "lyrics", "visualizer", "audio", "mv", "hd", "remix", "cover", "live"}
+    noisy = {
+        "official",
+        "video",
+        "lyrics",
+        "visualizer",
+        "audio",
+        "mv",
+        "hd",
+        "remix",
+        "cover",
+        "live",
+    }
     filtered = [t for t in tokens if t not in noisy]
     return filtered
 
@@ -240,6 +343,7 @@ def _should_skip_entry(entry: dict, query_text: str | None = None) -> bool:
 
     # If the user's query explicitly asks for these, do not skip for that reason
     query_norm = _normalize_text(query_text) if query_text else ""
+
     def query_mentions(term: str) -> bool:
         return bool(term) and (term in query_norm)
 
@@ -344,12 +448,18 @@ def pick_entry(entries: list, strategy: str) -> dict | None:
             # Noise stripped often helps
             s_noise = _similarity(title_noise_stripped, _strip_common_noise(query_text))
             # Token sort/set similarities approximate fuzzywuzzy behavior
-            s_token_sort = _similarity(token_sort_title, " ".join(sorted(_tokenize(query_text))))
-            s_token_set = _similarity(token_set_title, _token_set_string(_tokenize(query_text)))
+            s_token_sort = _similarity(
+                token_sort_title, " ".join(sorted(_tokenize(query_text)))
+            )
+            s_token_set = _similarity(
+                token_set_title, _token_set_string(_tokenize(query_text))
+            )
             # Token overlap (Jaccard)
             s_jaccard = _token_jaccard(title_tokens, query_tokens)
             # Substring bonus when query is contained in title (or vice versa)
-            contains_bonus = 0.1 if (query_norm in title_norm or title_norm in query_norm) else 0.0
+            contains_bonus = (
+                0.1 if (query_norm in title_norm or title_norm in query_norm) else 0.0
+            )
             # Author relevance (channel/uploader/artist)
             s_author = _similarity(_normalize_text(authors_full), query_norm) * 0.2
             # Author token overlap bonus
@@ -370,7 +480,11 @@ def pick_entry(entries: list, strategy: str) -> dict | None:
             # Include popularity via views and duration alignment to Spotify when available
             s_views = _views_score(e)
             spotify_info = e.get("__spotify__") or {}
-            desired_sec = spotify_info.get("duration_sec") if isinstance(spotify_info, dict) else None
+            desired_sec = (
+                spotify_info.get("duration_sec")
+                if isinstance(spotify_info, dict)
+                else None
+            )
             s_dur = _duration_similarity_seconds(e, desired_sec)
             flags = _title_flags(title)
             official_bonus = 0.08 if flags.get("official") else 0.0
@@ -396,7 +510,14 @@ def pick_entry(entries: list, strategy: str) -> dict | None:
                 + 0.10 * s_views
                 + 0.10 * s_dur
             )
-            return base_score + official_bonus + live_penalty + mix_penalty + album_penalty + visualizer_penalty
+            return (
+                base_score
+                + official_bonus
+                + live_penalty
+                + mix_penalty
+                + album_penalty
+                + visualizer_penalty
+            )
 
         # If debugging is enabled, log top-K with score breakdown
         config = get_runtime_config()
@@ -414,11 +535,21 @@ def pick_entry(entries: list, strategy: str) -> dict | None:
                 token_set_title = _token_set_string(title_tokens)
                 query_tokens = _tokenize(query_text)
                 s_base = _similarity(title_norm, query_norm)
-                s_noise = _similarity(title_noise_stripped, _strip_common_noise(query_text))
-                s_token_sort = _similarity(token_sort_title, " ".join(sorted(_tokenize(query_text))))
-                s_token_set = _similarity(token_set_title, _token_set_string(_tokenize(query_text)))
+                s_noise = _similarity(
+                    title_noise_stripped, _strip_common_noise(query_text)
+                )
+                s_token_sort = _similarity(
+                    token_sort_title, " ".join(sorted(_tokenize(query_text)))
+                )
+                s_token_set = _similarity(
+                    token_set_title, _token_set_string(_tokenize(query_text))
+                )
                 s_jaccard = _token_jaccard(title_tokens, query_tokens)
-                contains_bonus = 0.1 if (query_norm in title_norm or title_norm in query_norm) else 0.0
+                contains_bonus = (
+                    0.1
+                    if (query_norm in title_norm or title_norm in query_norm)
+                    else 0.0
+                )
                 s_author = _similarity(_normalize_text(authors_full), query_norm) * 0.2
                 s_author_tok = _token_jaccard(entry_author_tokens, query_author_tokens)
                 s_ai = _ai_similarity_score(query_text, title, authors_full) * 0.6
@@ -450,26 +581,40 @@ def pick_entry(entries: list, strategy: str) -> dict | None:
                     + noise_penalty
                 )
                 s_views = _views_score(e)
-                total = base_score + official_bonus + live_penalty + mix_penalty + album_penalty + visualizer_penalty + 0.10 * s_views
-                annotated.append((total, title, {
-                    "s_base": s_base,
-                    "s_noise": s_noise,
-                    "s_token_sort": s_token_sort,
-                    "s_token_set": s_token_set,
-                    "s_jaccard": s_jaccard,
-                    "s_len": s_len,
-                    "contains_bonus": contains_bonus,
-                    "s_author": s_author,
-                    "s_author_tok": s_author_tok,
-                    "s_ai": s_ai,
-                    "s_views": s_views,
-                    "official_bonus": official_bonus,
-                    "live_penalty": live_penalty,
-                    "mix_penalty": mix_penalty,
-                    "album_penalty": album_penalty,
-                    "visualizer_penalty": visualizer_penalty,
-                    "noise_penalty": noise_penalty,
-                }))
+                total = (
+                    base_score
+                    + official_bonus
+                    + live_penalty
+                    + mix_penalty
+                    + album_penalty
+                    + visualizer_penalty
+                    + 0.10 * s_views
+                )
+                annotated.append(
+                    (
+                        total,
+                        title,
+                        {
+                            "s_base": s_base,
+                            "s_noise": s_noise,
+                            "s_token_sort": s_token_sort,
+                            "s_token_set": s_token_set,
+                            "s_jaccard": s_jaccard,
+                            "s_len": s_len,
+                            "contains_bonus": contains_bonus,
+                            "s_author": s_author,
+                            "s_author_tok": s_author_tok,
+                            "s_ai": s_ai,
+                            "s_views": s_views,
+                            "official_bonus": official_bonus,
+                            "live_penalty": live_penalty,
+                            "mix_penalty": mix_penalty,
+                            "album_penalty": album_penalty,
+                            "visualizer_penalty": visualizer_penalty,
+                            "noise_penalty": noise_penalty,
+                        },
+                    )
+                )
             annotated.sort(key=lambda x: x[0], reverse=True)
             top_k = config.debug_top_k
             logging.info("Matching breakdown for query: %s", query_text)
@@ -487,6 +632,7 @@ __all__ = [
     "_duration_similarity_seconds",
     "_get_view_count",
     "_views_score",
+    "_get_preferred_device",
     "_ensure_embed_model",
     "_ai_similarity_score",
     "_extract_authors_text",

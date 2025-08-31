@@ -31,6 +31,22 @@ class RuntimeConfig:
     spotify_min_score: float = 0.35
     deep_search: bool = False
     search_without_authors: bool = False
+    # Audio quality settings
+    audio_quality: str = "192"  # kbps or "best"
+    audio_format: str = "mp3"   # "mp3", "m4a", "opus", "flac"
+    # Authentication settings
+    cookies_file: str | None = None  # Path to cookies.txt file
+    # Google search settings
+    use_google_search: bool = False
+    google_api_key: str | None = None
+    google_search_engine_id: str | None = None
+    google_min_confidence: float = 0.3
+    use_google_search_fallback: bool = False
+    filter_queries_with_google: bool = False
+    use_llm_google_parsing: bool = False
+    llm_api_key: str | None = None
+    llm_model: str = "gpt-3.5-turbo"
+    llm_base_url: str | None = None  # For local LLMs like Ollama
 
 
 # Module-global runtime configuration, populated in main()

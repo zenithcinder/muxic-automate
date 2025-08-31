@@ -8,10 +8,38 @@ Download the first YouTube result for each query as MP3 using yt-dlp.
 - pip packages in `requirements.txt`
 
 ### Install
+
+#### Full installation (recommended)
+Includes all features including AI semantic matching:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+#### Minimal installation
+For core functionality only (no AI matching):
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-minimal.txt
+```
+
+#### System dependencies
+Install ffmpeg for audio extraction:
+- **Ubuntu/Debian**: `sudo apt install ffmpeg`
+- **macOS**: `brew install ffmpeg`
+- **Windows**: Download from https://ffmpeg.org/download.html
+
+#### Verify installation
+Test that all dependencies are working:
+```bash
+python test_dependencies.py
+```
+
+Test GPU detection for AI matching:
+```bash
+python test_gpu_detection.py
 ```
 
 ### Project Structure
@@ -123,6 +151,19 @@ Useful when:
 --spotify-client-secret Spotify Client Secret (required with --use-spotify)
 --debug-matching        Log top candidates with score breakdown
 --debug-topk            How many top candidates to show with --debug-matching (default: 10)
+--audio-quality         Audio quality in kbps (e.g., 192, 320) or 'best' for highest available
+--audio-format          Audio format for output files: mp3, m4a, opus, flac (default: mp3)
+--cookies-file          Path to cookies.txt file for YouTube authentication (handles age restrictions)
+--use-google-search     Use Google search to enrich queries with additional context
+--google-api-key        Google Custom Search API key (required when --use-google-search)
+--google-search-engine-id Google Custom Search Engine ID (required when --use-google-search)
+--google-min-confidence Minimum confidence score for Google search enrichment (0.0-1.0, default: 0.3)
+--use-google-search-fallback Use web scraping fallback for Google search (when API is not available)
+--filter-queries-with-google Filter queries through Google search first and use first result details as input
+--use-llm-google-parsing Use LLM to parse Google search results (requires --llm-api-key or --llm-base-url)
+--llm-api-key API key for LLM service (OpenAI, Anthropic, etc.) for parsing Google results
+--llm-model LLM model to use for parsing (default: gpt-3.5-turbo)
+--llm-base-url Base URL for local LLM service (e.g., http://localhost:11434 for Ollama)
 ```
 
 ### Examples
@@ -156,6 +197,16 @@ Combine both features for maximum coverage:
 python main.py --input queries.txt --deep-search --search-without-authors
 ```
 
+Filter queries through Google search for better accuracy:
+```bash
+python main.py --input queries.txt --filter-queries-with-google --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+```
+
+Combine multiple features for maximum coverage:
+```bash
+python main.py --input queries.txt --deep-search --search-without-authors --filter-queries-with-google
+```
+
 Throttle downloads if your network is sensitive:
 ```bash
 python main.py --input queries.txt --rate-limit-kbps 512
@@ -176,9 +227,298 @@ List mode writes incrementally while searching, so you can open the file and wat
 python main.py --input queries.txt --list-only --list-output links.txt
 ```
 
+Download with higher audio quality (320 kbps):
+```bash
+python main.py --input queries.txt --audio-quality 320
+```
+
+Download in lossless FLAC format:
+```bash
+python main.py --input queries.txt --audio-format flac --audio-quality best
+```
+
+Download in M4A format (better quality than MP3):
+```bash
+python main.py --input queries.txt --audio-format m4a --audio-quality best
+```
+
+Use authentication to bypass age restrictions:
+```bash
+python main.py --input queries.txt --cookies-file cookies.txt
+```
+
+Use Google search enrichment for better results:
+```bash
+python main.py --input queries.txt --use-google-search --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+```
+
+Use Google search with fallback (web scraping):
+```bash
+python main.py --input queries.txt --use-google-search --use-google-search-fallback
+```
+
+Filter queries through Google search first:
+```bash
+python main.py --input queries.txt --filter-queries-with-google --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+```
+
+Combine multiple Google features for maximum accuracy:
+```bash
+python main.py --input queries.txt --filter-queries-with-google --use-google-search --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+```
+
+Use LLM-based parsing for more reliable results:
+```bash
+python main.py --input queries.txt --filter-queries-with-google --use-llm-google-parsing --llm-api-key YOUR_OPENAI_KEY
+```
+
+Use local LLM for privacy and cost savings:
+```bash
+python main.py --input queries.txt --filter-queries-with-google --use-llm-google-parsing --llm-base-url http://localhost:11434 --llm-model llama2
+```
+
+### Audio Quality and Formats
+
+The tool supports multiple audio formats and quality levels:
+
+- **MP3**: Default format, good compatibility (default: 192 kbps)
+- **M4A**: Better quality than MP3 at same bitrate, smaller file size
+- **Opus**: Excellent quality at low bitrates, modern codec
+- **FLAC**: Lossless format, highest quality but larger files
+
+Quality options:
+- Specific bitrate: `192`, `256`, `320` kbps
+- `best`: Automatically selects the highest available quality
+
+Examples:
+```bash
+# High quality MP3
+python main.py --input songs.txt --audio-quality 320
+
+# Best available quality in M4A format
+python main.py --input songs.txt --audio-format m4a --audio-quality best
+
+# Lossless FLAC
+python main.py --input songs.txt --audio-format flac
+```
+
+### YouTube Authentication (Age Restrictions)
+
+Some YouTube videos have age restrictions that prevent downloading. You can bypass this by using authentication:
+
+1. **Generate cookies automatically** (recommended):
+   ```bash
+   python -m yt_search_dl.generate_cookies --output cookies.txt
+   ```
+
+2. **Create manual template**:
+   ```bash
+   python -m yt_search_dl.generate_cookies --output cookies.txt --manual
+   ```
+   Then edit the file and add your YouTube cookies manually.
+
+3. **Use with downloads**:
+   ```bash
+   python main.py --input songs.txt --cookies-file cookies.txt
+   ```
+
+**Note**: You need to be logged into YouTube in your browser for this to work. The cookies file contains your authentication data, so keep it secure.
+
+### Google Search Enrichment
+
+Google search enrichment can improve query accuracy by finding additional context, correct song titles, and artist information from web search results.
+
+#### Setup (API Method - Recommended)
+
+1. **Create a Google Custom Search Engine**:
+   - Go to https://cse.google.com/
+   - Create a new search engine
+   - Add sites like YouTube, Spotify, music databases
+   - Note your Search Engine ID
+
+2. **Get Google API Key**:
+   - Go to https://console.cloud.google.com/
+   - Enable Custom Search API
+   - Create credentials (API Key)
+
+3. **Use with downloads**:
+   ```bash
+   python main.py --input songs.txt --use-google-search --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+   ```
+
+#### Setup (Fallback Method)
+
+If you don't have API credentials, you can use web scraping fallback:
+```bash
+python main.py --input songs.txt --use-google-search --use-google-search-fallback
+```
+
+**Note**: The fallback method is less reliable and may be rate-limited by Google.
+
+### Google Query Filtering
+
+Google query filtering takes your input queries and refines them using Google search results before searching YouTube. This helps improve accuracy by using Google's search results to correct and enhance your queries.
+
+#### How it works
+
+1. **Reads queries** from your input file
+2. **Searches Google** for each query using Google Custom Search API
+3. **Extracts the first result's title** from Google search results
+4. **Uses that title** as the new query for YouTube search
+5. **Falls back gracefully** if Google search fails (uses original query)
+
+#### Setup
+
+Same setup as Google Search Enrichment (requires Google Custom Search API):
+
+1. **Create a Google Custom Search Engine**:
+   - Go to https://cse.google.com/
+   - Create a new search engine
+   - Add sites like YouTube, Spotify, music databases
+   - Note your Search Engine ID
+
+2. **Get Google API Key**:
+   - Go to https://console.cloud.google.com/
+   - Enable Custom Search API
+   - Create credentials (API Key)
+
+3. **Use with downloads**:
+   ```bash
+   python main.py --input songs.txt --filter-queries-with-google --google-api-key YOUR_API_KEY --google-search-engine-id YOUR_ENGINE_ID
+   ```
+
+#### Example workflow
+
+- **Input file contains**: `"bohemian rhapsody"`
+- **Google search finds**: `"Bohemian Rhapsody - Queen (Official Video Remastered)"`
+- **YouTube search uses**: `"Bohemian Rhapsody - Queen (Official Video Remastered)"`
+- **Result**: Better, more accurate YouTube search results!
+
+#### When to use
+
+This feature is particularly useful when you have:
+- **Incomplete song titles** in your input file
+- **Misspelled artist names** or song titles
+- **Ambiguous queries** that need disambiguation
+- **Want to ensure you get the most popular/accurate version** of a song
+
+#### Fallback support
+
+If you don't have API credentials, you can use web scraping fallback:
+```bash
+python main.py --input songs.txt --filter-queries-with-google --use-google-search-fallback
+```
+
+**Note**: The fallback method is less reliable and may be rate-limited by Google.
+
+### LLM-Based Google Parsing
+
+For more reliable parsing without requiring Google Custom Search API credentials, you can use LLM-based parsing. This approach uses an LLM (like GPT-3.5) to intelligently parse Google search results and extract the first result title.
+
+#### Setup
+
+1. **Get an OpenAI API key**:
+   - Go to https://platform.openai.com/
+   - Create an account and get an API key
+
+2. **Install OpenAI library**:
+   ```bash
+   pip install openai
+   ```
+
+3. **Use with downloads**:
+   ```bash
+   python main.py --input songs.txt --filter-queries-with-google --use-llm-google-parsing --llm-api-key YOUR_OPENAI_KEY
+   ```
+
+#### How it works
+
+1. **Fetches Google search results** using web scraping
+2. **Sends HTML content to LLM** with specific instructions
+3. **LLM analyzes the page** and extracts the first search result title
+4. **Returns the enhanced query** for YouTube search
+
+#### Advantages
+
+- **No Google API required**: Works without Google Custom Search API
+- **Adaptive parsing**: LLM can handle Google's layout changes automatically
+- **Intelligent filtering**: Ignores ads, navigation, and irrelevant content
+- **More reliable**: Better success rate than traditional web scraping
+
+#### Example workflow
+
+- **Input**: `"bohemian rhapsody"`
+- **LLM analyzes Google results** and extracts: `"Bohemian Rhapsody - Queen (Official Video Remastered)"`
+- **YouTube search uses**: The enhanced title
+- **Result**: Better, more accurate results!
+
+#### Supported models
+
+- **OpenAI GPT models**: `gpt-3.5-turbo`, `gpt-4`, etc.
+- **Local LLMs**: Ollama, LM Studio, and other OpenAI-compatible APIs
+- **Custom models**: Can be extended to support other LLM providers
+
+### Local LLM Support
+
+For privacy, cost savings, and offline operation, you can use local LLMs like Ollama.
+
+#### Setup with Ollama
+
+1. **Install Ollama**:
+   ```bash
+   # macOS/Linux
+   curl -fsSL https://ollama.ai/install.sh | sh
+   
+   # Windows
+   # Download from https://ollama.ai/download
+   ```
+
+2. **Pull a model**:
+   ```bash
+   ollama pull llama2
+   # or
+   ollama pull mistral
+   # or
+   ollama pull codellama
+   ```
+
+3. **Start Ollama service**:
+   ```bash
+   ollama serve
+   ```
+
+4. **Use with downloads**:
+   ```bash
+   python main.py --input songs.txt --filter-queries-with-google --use-llm-google-parsing \
+     --llm-base-url http://localhost:11434 --llm-model llama2
+   ```
+
+#### Advantages of Local LLMs
+
+- **Privacy**: No data sent to external services
+- **Cost**: No API costs for inference
+- **Offline**: Works without internet connection
+- **Customization**: Use any model you prefer
+- **Speed**: Lower latency for local processing
+
+#### Supported Local LLM Services
+
+- **Ollama**: Easy-to-use local LLM runner
+- **LM Studio**: GUI-based local LLM manager
+- **Any OpenAI-compatible API**: Custom local deployments
+
+#### How it works
+
+- Searches for song information using Google
+- Extracts song titles, artists, albums, and years from search results
+- Uses pattern matching to identify music-related information
+- Only applies enrichment if confidence score is above threshold
+- Falls back to original query if no good matches found
+
 ### Troubleshooting
 - If downloads fail with audio extraction errors, ensure `ffmpeg` is installed and on PATH.
 - If a query does not find a good match, try simplifying the text (remove extra words like "official video" or add the artist name). The improved matching often handles this automatically, but inputs still matter.
+- If you get age restriction errors, use the `--cookies-file` option with authentication.
 
 ### Parallel processing
 You can process multiple queries concurrently. This is effective because searching/downloading are I/O-bound.
@@ -192,6 +532,7 @@ Notes:
 - Each worker respects `--delay` between its own requests.
 - Very high concurrency may trigger throttling; start with 2–4 and adjust.
 - GPU acceleration is not used here; it does not meaningfully speed up yt-dlp searches or MP3 encoding.
+- For AI matching, GPU acceleration is automatically detected and used when available.
 
 ### AI semantic matching (optional)
 Improves ranking when text is messy or varies (e.g., multiple languages, extra words). Disabled by default.
@@ -199,6 +540,15 @@ Improves ranking when text is messy or varies (e.g., multiple languages, extra w
 Install extra dependencies:
 ```bash
 pip install sentence-transformers numpy
+```
+
+For GPU acceleration (optional):
+```bash
+# CUDA 11.8 (adjust version as needed)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Or CPU-only PyTorch
+pip install torch torchvision torchaudio
 ```
 
 Enable:

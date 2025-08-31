@@ -11,6 +11,7 @@ from typing import List
 from .config import get_runtime_config
 from .matching import pick_entry, _should_skip_entry
 from .spotify import _spotify_search_first_track
+from .google_search import google_search_enrich_query
 from .utils import _extract_title_from_query
 
 
@@ -24,6 +25,13 @@ def search_video_url(query: str, search_count: int, strategy: str) -> str | None
     if config.deep_search:
         n = min(n * 2, 50)  # Double the search count, but cap at 50
         logging.debug("Deep search enabled: using %d results", n)
+    
+    # Optionally enrich query via Google search
+    google_enriched = google_search_enrich_query(query)
+    if google_enriched:
+        query = google_enriched["query"]
+        logging.debug("Google search enriched query: '%s' -> '%s'", 
+                     google_enriched.get("original_query", query), query)
     
     # Optionally enrich query via Spotify
     enriched = _spotify_search_first_track(query)
@@ -69,6 +77,8 @@ def search_video_url(query: str, search_count: int, strategy: str) -> str | None
                     e_copy["__query__"] = query
                     if enriched:
                         e_copy["__spotify__"] = enriched
+                    if google_enriched:
+                        e_copy["__google__"] = google_enriched
                     entries.append(e_copy)
 
                 # Fast path: if best strategy, return early on an exact match
